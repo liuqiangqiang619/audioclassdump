@@ -30,22 +30,24 @@ jobs:
           git sparse-checkout set "$SDK"
           git checkout
 
-      - name: Compile dylib
+      - name: Compile dylibs
         run: |
           SYSROOT="$PWD/sdkrepo/$SDK"
           clang --version
-          set +e
+          set -e
           clang -target arm64-apple-ios15.0 -arch arm64 -isysroot "$SYSROOT" \
             -fobjc-arc -O2 -dynamiclib -fno-modules -fuse-ld=lld \
             -framework Foundation -framework UIKit \
-            Tweak/ClassesDump.m -o TLAudioDump.dylib > build.log 2>&1
-          rc=$?
-          cat build.log
-          file TLAudioDump.dylib 2>/dev/null
-          ls -l TLAudioDump.dylib 2>/dev/null
-          exit $rc
+            Tweak/ClassesDump.m -o TLAudioDump.dylib
+          clang -target arm64-apple-ios15.0 -arch arm64 -isysroot "$SYSROOT" \
+            -fobjc-arc -O2 -dynamiclib -fno-modules -fuse-ld=lld \
+            -framework Foundation -framework UIKit \
+            Tweak/AudioProbe.m -o TLAudioProbe.dylib
+          ls -l TLAudioDump.dylib TLAudioProbe.dylib
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TLAudioDump-dylib
-          path: TLAudioDump.dylib
+          name: TL-dylibs
+          path: |
+            TLAudioDump.dylib
+            TLAudioProbe.dylib
