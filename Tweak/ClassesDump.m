@@ -1,7 +1,6 @@
-// TLAudioDump — 只读诊断：把抖音里与音频相关的类/选择子导出来，不发任何 hook。
-// 不会改变 App 行为，装错也不会崩（不 hook 任何方法）。
-#import <Foundation/Foundation.h>
+﻿// TLAudioDump 鈥?鍙璇婃柇锛氭妸鎶栭煶閲屼笌闊抽鐩稿叧鐨勭被/閫夋嫨瀛愬鍑烘潵锛屼笉鍙戜换浣?hook銆?// 涓嶄細鏀瑰彉 App 琛屼负锛岃閿欎篃涓嶄細宕╋紙涓?hook 浠讳綍鏂规硶锛夈€?#import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <UIKit/UIKit.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <sys/socket.h>
@@ -71,7 +70,7 @@ static NSString *DumpClasses(void) {
     free(all);
     [out appendFormat:@"# emitted classes %d\n", emitted];
 
-    /* 加载的镜像，便于看抖音用了哪些 RTC 库 */
+    /* 鍔犺浇鐨勯暅鍍忥紝渚夸簬鐪嬫姈闊崇敤浜嗗摢浜?RTC 搴?*/
     uint32_t ic = _dyld_image_count();
     [out appendString:@"# images\n"];
     for (uint32_t i = 0; i < ic; i++) {
