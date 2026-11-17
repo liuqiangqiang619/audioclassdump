@@ -121,8 +121,8 @@ static void paint(AudioBufferList *io, UInt32 inFrames) {
 
     // ---- 抖动缓冲：把积压控制在 150ms，多了丢最旧的、少了补静音 ----
     {
-        static const size_t TARGET = 48000 * 2 * 120 / 1000;          // 150ms（交错采样数）
-        static const size_t HARD   = 48000 * 2 * 1200 / 1000; // 350ms 以上直接跳到目标
+        static const size_t TARGET = 48000 * 2 * 120 / 1000;          // 目标 120ms（交错采样数）
+        static const size_t HARD   = 48000 * 2 * 420 / 1000;  // 超过 420ms 直接跳到目标（开播瞬间的突发积压）
         if (g_ringN > HARD) {
             size_t drop = g_ringN - TARGET;
             drop -= drop % ch;
@@ -130,6 +130,19 @@ static void paint(AudioBufferList *io, UInt32 inFrames) {
             g_ringN -= drop;
             g_dropSamples += drop;
         } else if (g_ringN > TARGET + 240) {
+            // 快速收敛：超量越大砍越多（1/8，单次上限 4800 交错采样=25ms），几十毫秒内回到目标，
+            // 避免"慢漏"导致延迟在整场直播里持续漂移（听感=时快时慢）
+            size_t over = g_ringN - TARGET;
+            if (over > 2880) {                    // 目标以上 30ms 起才做比例削减
+                size_t cut = over / 8;
+                if (cut > 4800) cut = 4800;
+                cut -= cut % ch;
+                if (cut) {
+                    g_ringR = (g_ringR + cut) % TL_RING_SAMPLES;
+                    g_ringN -= cut;
+                    g_dropSamples += cut;
+                }
+            }
             slip = 1;                    // 多取 1 帧：时间轴前移 20.8us，1 采样级跳变，听不出来
             g_dropSamples += ch;
         } else if (g_ringN + 240 < TARGET) {
