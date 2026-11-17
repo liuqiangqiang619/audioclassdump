@@ -129,11 +129,10 @@ static void paint(AudioBufferList *io, UInt32 inFrames) {
             g_ringR = (g_ringR + drop) % TL_RING_SAMPLES;
             g_ringN -= drop;
             g_dropSamples += drop;
-        } else if (g_ringN > TARGET + 240) {
-            // 快速收敛：超量越大砍越多（1/8，单次上限 4800 交错采样=25ms），几十毫秒内回到目标，
-            // 避免"慢漏"导致延迟在整场直播里持续漂移（听感=时快时慢）
+        } else if (g_ringN > TARGET + 960) {
+            // 死区 ±10ms（960 交错采样）；出死区才纠偏，且纠偏走下面的线性重采样，不是硬砍
             size_t over = g_ringN - TARGET;
-            if (over > 2880) {                    // 目标以上 30ms 起才做比例削减
+            if (over > 4800) {                    // 目标以上 50ms 起才做比例削减
                 size_t cut = over / 8;
                 if (cut > 4800) cut = 4800;
                 cut -= cut % ch;
@@ -143,22 +142,38 @@ static void paint(AudioBufferList *io, UInt32 inFrames) {
                     g_dropSamples += cut;
                 }
             }
-            slip = 1;                    // 多取 1 帧：时间轴前移 20.8us，1 采样级跳变，听不出来
+            slip = 1;
             g_dropSamples += ch;
-        } else if (g_ringN + 240 < TARGET) {
-            slip = -1;                   // 少取 1 帧：补 1 帧，同样听不出来
+        } else if (g_ringN + 960 < TARGET) {
+            slip = -1;
             g_underSamples += ch;
         }
     }
 
-    size_t pullFrames = (size_t)((long)frames + slip);
-    size_t need = pullFrames * ch;
+    // 纠偏统一走「线性重采样」：拉 pullFrames 帧重采样成 frames 帧，
+    // 5.2ms 里摊掉 ±1 帧的时间误差，没有硬丢/硬补造成的咔哒与爆音。
+    long pull = (long)frames + slip;
+    if (pull < 2) pull = 2;
+    size_t pullFrames = (size_t)pull;
+    size_t need = (pullFrames + 1) * ch;      // 多拉 1 帧给插值尾巴
     size_t got = ringPop(tmp, need);
     if (got < need) g_underSamples += (need - got);
     for (size_t i = got; i < need; i++) tmp[i] = 0;
-    if (slip < 0 && pullFrames > 0) {
-        for (size_t c = 0; c < ch; c++) tmp[need + c] = tmp[need - ch + c];
-        need += ch;
+    if (pullFrames != (size_t)frames) {
+        static int16_t out2[4100 * 2];
+        double stepf = (double)pullFrames / (double)frames;
+        for (UInt32 f = 0; f < frames; f++) {
+            double pp = (double)f * stepf;
+            size_t i0 = (size_t)pp;
+            double fr = pp - (double)i0;
+            if (i0 + 1 > pullFrames) { i0 = pullFrames - 1; fr = 1.0; }
+            for (UInt32 c = 0; c < ch; c++) {
+                double a = (double)tmp[i0 * ch + c];
+                double b = (double)tmp[(i0 + 1) * ch + c];
+                out2[(size_t)f * ch + c] = (int16_t)(a + (b - a) * fr);
+            }
+        }
+        memcpy(tmp, out2, (size_t)frames * ch * sizeof(int16_t));
     }
     if (isFloat) {
         if (nonInt && io->mNumberBuffers >= ch) {
