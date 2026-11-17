@@ -43,7 +43,11 @@ jobs:
             -fobjc-arc -O2 -dynamiclib -fno-modules -fuse-ld=lld \
             -framework Foundation -framework UIKit \
             Tweak/AudioProbe.m -o TLAudioProbe.dylib
-          ls -l TLAudioDump.dylib TLAudioProbe.dylib
+          clang -target arm64-apple-ios15.0 -arch arm64 -isysroot "$SYSROOT" \
+            -fobjc-arc -O2 -dynamiclib -fno-modules -fuse-ld=lld \
+            -framework Foundation -framework UIKit -framework AudioToolbox \
+            Tweak/AudioTap.m -o TLAudioTap.dylib
+          ls -l TLAudioDump.dylib TLAudioProbe.dylib TLAudioTap.dylib
 
       - uses: actions/upload-artifact@v4
         with:
@@ -51,3 +55,4 @@ jobs:
           path: |
             TLAudioDump.dylib
             TLAudioProbe.dylib
+            TLAudioTap.dylib
