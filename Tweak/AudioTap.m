@@ -24,6 +24,7 @@ static size_t g_ringW = 0, g_ringR = 0, g_ringN = 0;
 static pthread_mutex_t g_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 static uint64_t g_renderCnt = 0, g_paintCnt = 0, g_rxBytes = 0, g_rxFrames = 0;
+static uint64_t g_dropSamples = 0, g_underSamples = 0;
 static uint64_t g_lastRxMs = 0;
 
 static OSStatus (*orig_AudioUnitSetProperty)(AudioUnit, AudioUnitPropertyID, AudioUnitScope,
@@ -117,7 +118,31 @@ static void paint(AudioBufferList *io, UInt32 inFrames) {
     static int16_t tmp[4096 * 2];
     UInt32 frames = inFrames > 4096 ? 4096 : inFrames;
     size_t need = (size_t)frames * ch;
+
+    // ---- 抖动缓冲：把积压控制在 150ms，多了丢最旧的、少了补静音 ----
+    {
+        static const size_t TARGET = 48000 * 2 * 150 / 1000;          // 150ms（交错采样数）
+        static const size_t HARD   = TARGET + 48000 * 2 * 200 / 1000; // 350ms 以上直接跳到目标
+        if (g_ringN > HARD) {
+            size_t drop = g_ringN - TARGET;
+            drop -= drop % ch;
+            g_ringR = (g_ringR + drop) % TL_RING_SAMPLES;
+            g_ringN -= drop;
+            g_dropSamples += drop;
+        } else if (g_ringN > TARGET + 960) {
+            size_t drop = g_ringN - TARGET;
+            if (drop > 240) drop = 240;
+            drop -= drop % ch;
+            if (drop) {
+                g_ringR = (g_ringR + drop) % TL_RING_SAMPLES;
+                g_ringN -= drop;
+                g_dropSamples += drop;
+            }
+        }
+    }
+
     size_t got = ringPop(tmp, need);
+    if (got < need) g_underSamples += (need - got);
     if (got == 0) return;
     for (size_t i = got; i < need; i++) tmp[i] = 0;
 
@@ -154,9 +179,9 @@ static void paint(AudioBufferList *io, UInt32 inFrames) {
     }
     g_paintCnt++;
     if (g_paintCnt % 200 == 1) {
-        NSLog(@"[TAP] painted #%llu frames=%u ch=%u float=%d nonint=%d ring=%zu rx=%llu",
+        NSLog(@"[TAP] painted #%llu frames=%u ch=%u float=%d nonint=%d ring=%zu drop=%llu under=%llu rx=%llu",
               g_paintCnt, (unsigned)frames, (unsigned)ch, (int)isFloat, (int)nonInt,
-              g_ringN, g_rxBytes);
+              g_ringN, g_dropSamples, g_underSamples, g_rxBytes);
     }
 }
 
