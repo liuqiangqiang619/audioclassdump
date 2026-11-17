@@ -115,37 +115,38 @@ static void paint(AudioBufferList *io, UInt32 inFrames) {
     BOOL isFloat = g_haveFmt ? ((g_fmt.mFormatFlags & kAudioFormatFlagIsFloat) != 0) : YES;
     BOOL nonInt  = g_haveFmt ? ((g_fmt.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0) : NO;
 
-    static int16_t tmp[4096 * 2];
-    UInt32 frames = inFrames > 4096 ? 4096 : inFrames;
-    size_t need = (size_t)frames * ch;
+    static int16_t tmp[4100 * 2];
+    UInt32 frames = inFrames > 4000 ? 4000 : inFrames;
+    long slip = 0;
 
     // ---- 抖动缓冲：把积压控制在 150ms，多了丢最旧的、少了补静音 ----
     {
-        static const size_t TARGET = 48000 * 2 * 150 / 1000;          // 150ms（交错采样数）
-        static const size_t HARD   = TARGET + 48000 * 2 * 200 / 1000; // 350ms 以上直接跳到目标
+        static const size_t TARGET = 48000 * 2 * 120 / 1000;          // 150ms（交错采样数）
+        static const size_t HARD   = 48000 * 2 * 1200 / 1000; // 350ms 以上直接跳到目标
         if (g_ringN > HARD) {
             size_t drop = g_ringN - TARGET;
             drop -= drop % ch;
             g_ringR = (g_ringR + drop) % TL_RING_SAMPLES;
             g_ringN -= drop;
             g_dropSamples += drop;
-        } else if (g_ringN > TARGET + 960) {
-            size_t drop = g_ringN - TARGET;
-            if (drop > 240) drop = 240;
-            drop -= drop % ch;
-            if (drop) {
-                g_ringR = (g_ringR + drop) % TL_RING_SAMPLES;
-                g_ringN -= drop;
-                g_dropSamples += drop;
-            }
+        } else if (g_ringN > TARGET + 240) {
+            slip = 1;                    // 多取 1 帧：时间轴前移 20.8us，1 采样级跳变，听不出来
+            g_dropSamples += ch;
+        } else if (g_ringN + 240 < TARGET) {
+            slip = -1;                   // 少取 1 帧：补 1 帧，同样听不出来
+            g_underSamples += ch;
         }
     }
 
+    size_t pullFrames = (size_t)((long)frames + slip);
+    size_t need = pullFrames * ch;
     size_t got = ringPop(tmp, need);
     if (got < need) g_underSamples += (need - got);
-    // 注意：没有数据时也继续往下走，用静音覆盖，绝不让真麦克风漏出去
     for (size_t i = got; i < need; i++) tmp[i] = 0;
-
+    if (slip < 0 && pullFrames > 0) {
+        for (size_t c = 0; c < ch; c++) tmp[need + c] = tmp[need - ch + c];
+        need += ch;
+    }
     if (isFloat) {
         if (nonInt && io->mNumberBuffers >= ch) {
             for (UInt32 c = 0; c < ch; c++) {
