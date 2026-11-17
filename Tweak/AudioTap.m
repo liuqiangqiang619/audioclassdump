@@ -143,7 +143,7 @@ static void paint(AudioBufferList *io, UInt32 inFrames) {
 
     size_t got = ringPop(tmp, need);
     if (got < need) g_underSamples += (need - got);
-    if (got == 0) return;
+    // 注意：没有数据时也继续往下走，用静音覆盖，绝不让真麦克风漏出去
     for (size_t i = got; i < need; i++) tmp[i] = 0;
 
     if (isFloat) {
